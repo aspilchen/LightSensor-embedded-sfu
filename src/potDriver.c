@@ -5,64 +5,44 @@
 
 #include "potDriver.h"
 
-static enum pot_ErrCode ERR_CODE = POT_OK;
+// If b is false, returns error code from containing function.
+#define SOFT_ASSERT(b) {if(!(b)) {return POT_ERR;}}
 
-static const double POT_A2D_VOLTAGE = 1.8;
 static const char POT_A2D_FILE[]	= "/sys/bus/iio/devices/iio:device0/in_voltage0_raw";
-static const int POT_A2D_MAX	    = 4095;
 
+static enum pot_ErrCode potDriver_readRawImpl(int32_t* output);
+static enum pot_ErrCode potDriver_readVoltImpl(double* output);
 
-static inline FILE* potDriver_fopen();
-static inline int potDriver_read(FILE* f);
+/*****************************************/
+/********** interface functions **********/
 
-int32_t potDriver_readRaw()
+enum pot_ErrCode potDriver_readRaw(int32_t* output)
 {
-	int32_t value = 0;
-	FILE* f = potDriver_fopen();
-	if (!f) {
-		return POT_ERROR;
-	}
-	value = potDriver_read(f);
-	fclose(f);
-	if (value < 0) {
-		return POT_ERROR;
-	}
-	return value;
+	return potDriver_readRawImpl(output);
 }
 
-int64_t potDriver_readVolt()
+enum pot_ErrCode potDriver_readVolt(double* output)
 {
-	int64_t voltage = 0;
+	return potDriver_readVoltImpl(output);
+}
+
+/**************************************/
+/********** static functions **********/
+
+static enum pot_ErrCode potDriver_readRawImpl(int32_t* output)
+{
+	FILE* f = fopen(POT_A2D_FILE, "r");
+	SOFT_ASSERT(f);
+	int32_t itemsRead = fscanf(f, "%d", output);
+	fclose(f);
+	SOFT_ASSERT(itemsRead >= 0);
+	return POT_OK;
+}
+
+static enum pot_ErrCode potDriver_readVoltImpl(double* output)
+{
 	int32_t rawValue = 0;
-	FILE* f = potDriver_fopen();
-	if (!f) {
-		return POT_ERROR;
-	}
-	rawValue = potDriver_read(f);
-	fclose(f);
-	if (rawValue < 0) {
-		return POT_ERROR;
-	}
-	voltage = ((double)rawValue / POT_A2D_MAX) * POT_A2D_VOLTAGE;
-	return voltage;
-}
-
-static inline FILE* potDriver_fopen()
-{
-	FILE *f = fopen(POT_A2D_FILE, "r");
-	if (!f) {
-		ERR_CODE = POT_FOPEN_ERR;
-	}
-	return f;
-}
-
-static inline int potDriver_read(FILE* f)
-{
-	int32_t value;
-	int32_t itemsRead = fscanf(f, "%d", &value);
-	if (itemsRead <= 0) {
-		ERR_CODE = POT_READ_ERR;
-		return POT_ERROR;
-	}
-	return value;
+	enum pot_ErrCode errCode = potDriver_readRawImpl(&rawValue);
+	*output = ((double)rawValue / POT_MAX_VAL) * POT_MAX_VOLT;
+	return errCode;
 }

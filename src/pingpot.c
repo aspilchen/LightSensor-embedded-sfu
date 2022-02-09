@@ -3,93 +3,90 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <time.h>
 
+#include "potDriver.h"
 #include "pingpot.h"
 
-static struct pingpot_Request pingpot_getRequestImpl(int64_t nPings, double interval, void (*rawCB) (int32_t output), void (*voltageCB) (double output));
-static void pingpot_requestImpl(struct pingpot_Request* request);
-static void pingpot_killImpl(const struct pingpot_Request* request);
-static void* unlimited_thread(void* arg);
-// static void limited_thread(const struct pingpot_Request* request);
-static bool isValidRequest(const struct pingpot_Request* request);
+struct pingpot_Request pingpot_getRequestImpl(const second_t timeS
+											 ,const nanosecond_t timeNS
+											 ,void (*rawFunc)(const a2draw_t output)
+											 ,void (*voltageFunc)(const a2dvoltage_t output));
 
-static bool isActiveThread[PINGPOT_MAX_REQUESTS] = {false, false, false, false, false};
-static pthread_t threads[PINGPOT_MAX_REQUESTS];
+static void pingpot_pingImpl(struct pingpot_Request* request);
+static void pingpot_killImpl(struct pingpot_Request* request);
+static void* pingpot_threadFunc(void* arg);
 
 
-struct pingpot_Request pingpot_getRequest(int64_t nPings, double interval, void (*rawCB) (int32_t output), void (*voltageCB) (double output))
+/*****************************************/
+/********** interface functions **********/
+struct pingpot_Request pingpot_getRequest(const second_t timeS
+										 ,const nanosecond_t timeNS
+										 ,void (*rawFunc)(const a2draw_t output)
+										 ,void (*voltageFunc)(const a2dvoltage_t output))
 {
-	return pingpot_getRequestImpl(nPings, interval, rawCB, voltageCB);
+	return pingpot_getRequestImpl(timeS, timeNS, rawFunc, voltageFunc);
 }
 
-void pingpot_request(struct pingpot_Request* request)
+void pingpot_ping(struct pingpot_Request* request)
 {
-	pingpot_requestImpl(request);
+	pingpot_pingImpl(request);
 }
 
-static struct pingpot_Request pingpot_getRequestImpl(int64_t nPings, double interval, void (*rawCB) (int32_t output), void (*voltageCB) (double output))
+/**************************************/
+/********** static functions **********/
+
+struct pingpot_Request pingpot_getRequestImpl(const second_t timeS
+											 ,const nanosecond_t timeNS
+											 ,void (*rawFunc)(const a2draw_t value)
+											 ,void (*voltageFunc)(const a2dvoltage_t value))
 {
-	int32_t id = -1;
-	for (int32_t i = 0; i < PINGPOT_MAX_REQUESTS; i++) {
-		if (!isActiveThread[i]) {
-			id = i;
-			break;
-		}
-	}
 	struct pingpot_Request request = {
-		nPings,
-		id,
-		interval,
-		rawCB,
-		voltageCB
+		timeS,
+		timeNS,
+		rawFunc,
+		voltageFunc,
+		false
 	};
 	return request;
 }
 
-void pingpot_kill(const struct pingpot_Request* request)
+void pingpot_kill(struct pingpot_Request* request)
 {
 	pingpot_killImpl(request);
 }
 
-static void pingpot_requestImpl(struct pingpot_Request* request)
+static void pingpot_pingImpl(struct pingpot_Request* request)
 {
-	bool isUnlimited = 0 <= request->nPings;
-	if (isValidRequest(request)) {
-		if (isUnlimited) {
-			isActiveThread[request->id] = true;
-			pthread_create(&threads[request->id], NULL, unlimited_thread, request);
-		}
+	if (!request->isActive) {
+		pthread_create(&(request->thread), NULL, pingpot_threadFunc, request);
 	}
 }
 
-static void* unlimited_thread(void* arg)
+static void* pingpot_threadFunc(void* arg)
 {
 	struct pingpot_Request* request = (struct pingpot_Request*)arg;
-	int rawReading = 0;
-	double voltageReading = 0;
-	while (isActiveThread[request->id]) {
-		if (request->intCB) {
-			rawReading = potDriver_readRaw();
-			request->intCB(rawReading);
+	a2draw_t rawReading = 0;
+	a2dvoltage_t voltageReading = 0.0;
+	struct timespec req = {request->timeS, request->timeMs};
+	struct timespec remaining; 
+	request->isActive = true;
+	while (request->isActive) {
+		potDriver_readVolt(&voltageReading);
+		if (request->intFunc) {
+			potDriver_readRaw(&rawReading);
+			request->intFunc(rawReading);
 		}
-		if (request->doubleCB) {
-			voltageReading = potDriver_readVolt();
-			request->doubleCB(voltageReading);
+		if (request->doubleFunc) {
+			request->doubleFunc(voltageReading);
 		}
-		sleep(request->interval);
+		nanosleep(&req, &remaining);
 	}
 	return NULL;
 }
 
-static void pingpot_killImpl(const struct pingpot_Request* request)
+static void pingpot_killImpl(struct pingpot_Request* request)
 {
-	if (isValidRequest(request) && isActiveThread[request->id]) {
-		isActiveThread[request->id] = false;
-		pthread_join(threads[request->id], NULL);
-	}
-}
-
-static bool isValidRequest(const struct pingpot_Request* request)
-{
-	return 0 <= request->id && request->id < PINGPOT_MAX_REQUESTS;
+	request->isActive = false;
+	pthread_join(request->thread, NULL);
 }

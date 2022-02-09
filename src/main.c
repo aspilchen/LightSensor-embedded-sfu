@@ -1,23 +1,43 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "pingpot.h"
+// #include "segdisDriver.h"
+// #include "light_sampler.h"
+// #include "network.h"
 
-void p1(int value) {
-	printf("value: %d\n", value);
+static pthread_mutex_t mainMutex = PTHREAD_MUTEX_INITIALIZER;
+static int exitcode = EXIT_SUCCESS;
+static bool isRunning = true;
+
+void potfunc(const int32_t value) {
+	printf("raw %d\n", value);
 }
 
-void p2(int value) {
-	printf("peepee %d\n", value);
+void pf(const double value) {
+	printf("voltage %f\n", value);
+}
+
+void main_exit(const int exitCode)
+{
+	exitcode = exitCode;
+	pthread_mutex_unlock(&mainMutex);
 }
 
 int main() {
-	struct pingpot_Request r1 = pingpot_getRequest(0, 1, p1, NULL);
-	struct pingpot_Request r2 = pingpot_getRequest(0, 1, p2, NULL);
-	pingpot_request(&r1);
-	sleep(2);
-	pingpot_request(&r2);
-	sleep(2);
-	pingpot_kill(&r1);
-	pingpot_kill(&r2);
+	struct pingpot_Request req = pingpot_getRequest(1, 0, potfunc, pf);
+	pingpot_ping(&req);
+	sleep(15);
+	pingpot_kill(&req);
+	//segdis_init();
+	//network_init();
+	//sampler_init();
+	//pthread_mutex_lock(&mainMutex);
+	//pthread_mutex_lock(&mainMutex);
+	//segdis_cleanup();
+	//network_cleanup();
+	//exit(exitcode);
 }
+

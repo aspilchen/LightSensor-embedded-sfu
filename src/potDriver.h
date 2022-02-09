@@ -3,15 +3,15 @@
 
 #include <stdint.h>
 
-enum pot_ErrCode {
-	POT_ERROR = -3,
-	POT_FOPEN_ERR,
-	POT_READ_ERR,
-	POT_OK
+#define POT_MAX_VAL 4095
+#define POT_MAX_VOLT 1.8
 
+enum pot_ErrCode {
+	POT_OK,
+	POT_ERR
 };
 
-int32_t potDriver_readRaw();
-int64_t potDriver_readVolt();
+enum pot_ErrCode potDriver_readRaw(int32_t* output);
+enum pot_ErrCode potDriver_readVolt(double* output);
 
 #endif

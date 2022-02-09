@@ -1,0 +1,1 @@
+void main_exit(const int exitCode);
