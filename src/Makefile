@@ -1,12 +1,13 @@
 CROSS_TOOL = arm-linux-gnueabihf-
 CC_C = $(CROSS_TOOL)gcc
-CFLAGS = -Wall -g -std=c99 -D _POSIX_C_SOURCE=200809L -Werror
+CFLAGS = -Wall -g -std=c99 -D _POSIX_C_SOURCE=200809L
+#-Werror
 
 MYPUBDIR = $(HOME)/Education/cmpt433/public/myApps
 PUBDIR = $(HOME)/cmpt433/public/myApps
 
 TARGETS = light_sampler
-DEPENDS = main.o pingpot.o potDriver.o
+DEPENDS = main.o pingpot.o potDriver.o gpioHelper.o i2cHelper.o segdisDriver.o network.o udp.o light_sampler.o circleQueue.o
 OUTDIR = ""
 
 all: $(TARGETS) deploy
