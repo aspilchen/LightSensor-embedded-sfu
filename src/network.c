@@ -1,26 +1,3 @@
-/*
- * UDP Listening program on port 22110
- * By Brian Fraser, Modified from Linux Programming Unleashed (book)
- *
- * Usage:
- *	On the target, run this program (netListenTest).
- *	On the host:
- *		> netcat -u 192.168.0.171 22110
- *		(Change the IP address to your board)
- *
- *	On the host, type in a number and press enter:
- *		4<ENTER>
- *
- *	On the target, you'll see a debug message:
- *	    Message received (2 bytes):
- *	    '4
- *	    '
- *
- *	On the host, you'll see the message:
- *	    Math: 4 + 1 = 5
- *
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <netdb.h>
@@ -33,37 +10,6 @@
 #include "network.h"
 #include "main.h"
 #include "light_sampler.h"
-
-/*
- * Accepted commands
- * help
- * Return a brief summary/list of supported commands.
- * count
- * Return the total number of light samples take so far (may be huge, like > 10 billion).
- * get N
- * Return the N most recent sample history values.
- * Display an error if N > number of samples currently in the history; indicate the valid
- * range of values.
- * length
- * Return both the max size of the history, and the number of samples currently in the
- * history. These values will not be the same if the buffer is not yet full.
- * history
- * Return all the data samples in the history.
- * Values must be the voltage of the sample, displayed to 3 decimal places.
- * Values must be comma separated, and display 20 numbers per line.
- * Send multiple return packets if the history is too big for one packet.
- * You can assume that 1,500 bytes of data will fit into a UDP packet. This works
- * across Ethernet over USB.
- * No single sample may have its digits split across two packets.
- * stop
- * Exit the program.
- * Must shutdown gracefully: close all open sockets, files, pipes, threads, and free all
- * dynamically allocated memory.
- * <enter>
- * A blank input (which will actually be a line-feed) should repeat the previous
- * command. If sent as the first command, treat as an unknown command.
- * All unknown commands return a message indicating it's unknown.
-*/
 
 struct network_CmdArg
 {
@@ -88,6 +34,7 @@ static void network_dipsFunc(struct network_CmdArg* arg);
 static void network_stopFunc(struct network_CmdArg* arg);
 static void network_helpFunc(struct network_CmdArg* arg);
 static void network_defaultFunc(struct network_CmdArg* arg);
+static void network_printArray(struct network_CmdArg* arg, lightsample_t* values, const samplesize_t size);
 
 #define NETWORK_N_CMDS 8
 #define NETWORK_REPEAT_CMD 6
@@ -110,6 +57,7 @@ static struct network_Command commands[NETWORK_N_CMDS+1] = // +1 to include defa
 static pthread_t thread;
 static bool isRunning = true;
 static int32_t socketDescriptor;
+static char buffer[MSG_MAX_LEN];
 
 static int32_t network_parseCommand(char* buffer);
 static inline void network_act(int32_t cmdNum, struct network_CmdArg* arg);
@@ -133,7 +81,6 @@ static void* network_threadFunc(void* arg)
 	const int32_t port = 12345;
 	int32_t bytesRead;
 	int32_t cmdNumber;
-	char buffer[MSG_MAX_LEN];
 	struct sockaddr_in sockAddr;
 	struct network_CmdArg cmdArg;
 	if (!initialized) {
@@ -154,16 +101,16 @@ static void* network_threadFunc(void* arg)
 	return NULL;
 }
 
-static int32_t network_parseCommand(char* buffer)
+static int32_t network_parseCommand(char* buff)
 {
 	int32_t cmdNumber = 0;
-	buffer = strtok(buffer, " ");
+	buff = strtok(buff, " ");
 	for (cmdNumber = 0; cmdNumber < NETWORK_N_CMDS; cmdNumber++) {
-		if (strcmp(commands[cmdNumber].symbol, buffer) == 0) {
+		if (strcmp(commands[cmdNumber].symbol, buff) == 0) {
 			break;
 		}
 	}
-	buffer = strtok(NULL, " ");
+	buff = strtok(NULL, " ");
 	return cmdNumber;
 }
 
@@ -175,30 +122,45 @@ static inline void network_act(int32_t cmdNum, struct network_CmdArg* arg)
 
 static void network_countFunc(struct network_CmdArg* arg)
 {
-	char buffer[MSG_MAX_LEN];
-	int32_t count = sampler_count();
+	samplesize_t count = sampler_count();
 	snprintf(buffer, MSG_MAX_LEN-1, "Number of samples taken = %d.\n", count);
 	udp_send(socketDescriptor, buffer, arg->addr);
 }
 
 static void network_lengthFunc(struct network_CmdArg* arg)
 {
-	
+	samplesize_t capacity = sampler_capacity();
+	samplesize_t size = sampler_size();
+	snprintf(buffer, MSG_MAX_LEN
+			,"History can hold %d samples.\nCurrently holding %d samples.\n"
+			,capacity, size);
+	udp_send(socketDescriptor, buffer, arg->addr);
 }
 
 static void network_historyFunc(struct network_CmdArg* arg)
-{
-	
+{	
+	lightsample_t samples[SAMPLER_MAX_HISTORY];
+	samplesize_t sampleSize = sampler_history(samples, MSG_MAX_LEN);
+	network_printArray(arg, samples, sampleSize);
 }
 
 static void network_getFunc(struct network_CmdArg* arg)
 {
-	
+	lightsample_t samples[SAMPLER_MAX_HISTORY];
+	uint32_t size = atoi(buffer);
+	samplesize_t sampleSize = sampler_history(samples, SAMPLER_MAX_HISTORY);
+	int32_t start = sampleSize - size - 1;
+	if (start < 0) {
+		start = 0;
+	}
+	network_printArray(arg, samples+start, size);
 }
 
 static void network_dipsFunc(struct network_CmdArg* arg)
 {
-	
+	samplesize_t nDips = sampler_dips();
+	snprintf(buffer, MSG_MAX_LEN-1, "# Dips = %d.\n", nDips);
+	udp_send(socketDescriptor, buffer, arg->addr);
 }
 
 static void network_stopFunc(struct network_CmdArg* arg)
@@ -209,14 +171,33 @@ static void network_stopFunc(struct network_CmdArg* arg)
 static void network_helpFunc(struct network_CmdArg* arg)
 {
 	const int32_t displayNCmds = NETWORK_N_CMDS - 1;
-	char buffer[MSG_MAX_LEN];
 	for (int32_t i = 0; i <  displayNCmds; i++) {
-		snprintf(buffer, MSG_MAX_LEN-1, "%-10s %s %s\n", commands[i].name, "--", commands[i].description);
+		snprintf(buffer, MSG_MAX_LEN-1, "%-10s -- %s\n", commands[i].name, commands[i].description);
 		udp_send(socketDescriptor, buffer, arg->addr);
 	}
+	snprintf(buffer, MSG_MAX_LEN-1, "\n");
+	udp_send(socketDescriptor, buffer, arg->addr);
 }
 
 static void network_defaultFunc(struct network_CmdArg* arg)
 {
 	udp_send(socketDescriptor, "Unknown command\n", arg->addr);
+}
+
+static void network_printArray(struct network_CmdArg* arg, lightsample_t* samples, const samplesize_t size)
+{	
+	const int32_t lineSize = 10;
+	const int32_t lineMod = lineSize - 1;
+	bool newLine = false;
+	for (int32_t i = 0; i < size; i++) {
+		newLine = (0 < i) && ((i % lineMod) == 0);
+		if (newLine) {
+			snprintf(buffer, MSG_MAX_LEN, "\n");
+			udp_send(socketDescriptor, buffer, arg->addr);
+		}
+		snprintf(buffer, MSG_MAX_LEN, "%0.3f, ", samples[i]);
+		udp_send(socketDescriptor, buffer, arg->addr);
+	}
+	snprintf(buffer, MSG_MAX_LEN, "\n\n");
+	udp_send(socketDescriptor, buffer, arg->addr);
 }

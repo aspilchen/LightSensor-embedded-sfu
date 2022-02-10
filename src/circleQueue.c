@@ -1,59 +1,70 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "circleQueue.h"
 
-static inline queueindex_t circleQueue_increment(const struct CircleQueue* queue, const queueindex_t i)
-{
-	return (i + 1) % (queue->capacity);
-}
+static void circleQueue_reset(struct CircleQueue* queue, const queuesize_t capacity);
+static inline queueindex_t circleQueue_increment(const struct CircleQueue* queue, const queueindex_t i);
 
-void circleQueue_init(struct CircleQueue* queue, const queuesize_t size)
+void circleQueue_init(struct CircleQueue* queue)
 {
-	queue->data = calloc(size+1, sizeof(queuedata_t));
+	const queuesize_t initCapacity = 100;
+	queue->data = calloc(initCapacity+1, sizeof(queuedata_t));
 	queue->top = 0;
 	queue->bottom = 0;
-	queue->capacity = size+1;
+	queue->capacity = initCapacity+1;
 	queue->totalItems = 0;
 	queue->size = 0;
-	queue->exponentialAverage = 0;
 	pthread_mutex_init(&(queue->lock), NULL);
 }
 
 // Not the most efficient but fuck it
-void circleQueue_resize(struct CircleQueue* queue, const queuesize_t size)
+void circleQueue_resize(struct CircleQueue* queue, const queuesize_t capacity)
 {
 	pthread_mutex_lock(&(queue->lock));
-	struct CircleQueue tmp;
 	queueindex_t idx = 0;
 	queueindex_t mappedIdx = 0;
+	struct CircleQueue tmp;
 	tmp.data = queue->data;
 	tmp.top = queue->top;
 	tmp.bottom = queue->bottom;
 	tmp.capacity = queue->capacity;
-	tmp.exponentialAverage = queue->exponentialAverage;
-	circleQueue_init(queue, size);
+	tmp.totalItems = queue->totalItems;
+	circleQueue_reset(queue, capacity);
 	mappedIdx = circleQueue_map(&tmp, idx);
 	while (0 <= mappedIdx) {
-		circleQueue_insert(queue, tmp.data[mappedIdx]);
+		circleQueue_insert(queue, tmp.data[mappedIdx], false);
 		idx += 1;
 		mappedIdx = circleQueue_map(&tmp, idx);
 	}
 	queue->totalItems = tmp.totalItems;
-	queue->exponentialAverage = tmp.exponentialAverage;
 	circleQueue_free(&tmp);
 	pthread_mutex_unlock(&(queue->lock));
 }
 
-void circleQueue_lock(struct CircleQueue* queue)
+queuesize_t circleQueue_dump(queuedata_t* dest, queuesize_t bufferSize, struct CircleQueue* src)
 {
-	pthread_mutex_lock(&(queue->lock));
-}
-
-void circleQueue_unlock(struct CircleQueue* queue)
-{
-	pthread_mutex_lock(&(queue->lock));
+	pthread_mutex_lock(&(src->lock));
+	queuesize_t itemsRead = 0;
+	queueindex_t buffIdx = 0;
+	queueindex_t qIdx = 0;
+	queueindex_t mappedIdx = circleQueue_map(src, qIdx);
+	if (bufferSize < src->size) {
+		int32_t diff = src->size - bufferSize;
+		qIdx += diff;
+		mappedIdx = circleQueue_map(src, qIdx);
+	}
+	while (0 <= mappedIdx) {
+		dest[buffIdx] = src->data[mappedIdx];
+		buffIdx += 1;
+		qIdx += 1;
+		mappedIdx = circleQueue_map(src, qIdx);
+		itemsRead += 1;
+	}
+	pthread_mutex_unlock(&(src->lock));
+	return itemsRead;
 }
 
 queuesize_t circleQueue_size(struct CircleQueue* queue)
@@ -63,7 +74,7 @@ queuesize_t circleQueue_size(struct CircleQueue* queue)
 
 queuesize_t circleQueue_capacity(struct CircleQueue* queue)
 {
-	return queue->capacity;
+	return queue->capacity - 1;
 }
 
 bool circleQueue_isEmpty(struct CircleQueue* queue)
@@ -71,23 +82,23 @@ bool circleQueue_isEmpty(struct CircleQueue* queue)
 	return queue->top == queue->bottom;
 }
 
-queueindex_t circleQueue_map(struct CircleQueue* queue, queueindex_t i)
+queueindex_t circleQueue_map(struct CircleQueue* queue, int32_t i)
 {
 	queueindex_t tmp = (queue->top + i) % queue->capacity;
-	if (i >= queue->capacity - 1) {
+	if (queue->capacity < i) {
 		return -1;
 	}
-	if ((queue->top < queue->bottom) && (queue->bottom <= tmp)) {
+	if (tmp == queue->bottom) {
 		return -1;
 	}
 	return tmp;
 }
 
-void circleQueue_insert(struct CircleQueue* queue, const queuedata_t value)
+void circleQueue_insert(struct CircleQueue* queue, const queuedata_t value, const bool lock)
 {
-	pthread_mutex_lock(&(queue->lock));
-	double weight = 0.01;
-	double avg = 0;
+	if (lock) {
+		pthread_mutex_lock(&(queue->lock));
+	}
 	queueindex_t bot = queue->bottom;
 	queueindex_t top = queue->top;
 	queue->data[bot] = value;
@@ -99,14 +110,11 @@ void circleQueue_insert(struct CircleQueue* queue, const queuedata_t value)
 	} else {
 		queue->size += 1;
 	}
-	if (queue->totalItems == 0) {
-		queue->exponentialAverage = value;
-	} else {
-		avg = (weight * value) + ((1.0-weight) * queue->exponentialAverage);
-		queue->exponentialAverage = avg;
-	}
+
 	queue->totalItems += 1;
-	pthread_mutex_unlock(&(queue->lock));
+	if (lock) {
+		pthread_mutex_unlock(&(queue->lock));
+	}
 }
 
 void circleQueue_free(struct CircleQueue* queue)
@@ -116,4 +124,29 @@ void circleQueue_free(struct CircleQueue* queue)
 	queue->top = 0;
 	queue->bottom = 0;
 	queue->capacity = 0;
+}
+
+void circleQueue_lock(struct CircleQueue* queue)
+{
+	pthread_mutex_lock(&(queue->lock));
+}
+
+void circleQueue_unlock(struct CircleQueue* queue)
+{
+	pthread_mutex_unlock(&(queue->lock));
+}
+
+static inline queueindex_t circleQueue_increment(const struct CircleQueue* queue, const queueindex_t i)
+{
+	return (i + 1) % (queue->capacity);
+}
+
+static void circleQueue_reset(struct CircleQueue* queue, const queuesize_t capacity)
+{
+	queue->data = calloc(capacity+1, sizeof(queuedata_t));
+	queue->top = 0;
+	queue->bottom = 0;
+	queue->capacity = capacity+1;
+	queue->totalItems = 0;
+	queue->size = 0;
 }

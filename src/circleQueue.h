@@ -21,15 +21,16 @@ struct CircleQueue
 	pthread_mutex_t lock;
 };
 
-void circleQueue_init(struct CircleQueue* queue, const queuesize_t size);
+void circleQueue_init(struct CircleQueue* queue);
 void circleQueue_lock(struct CircleQueue* queue);
 void circleQueue_unlock(struct CircleQueue* queue);
 void circleQueue_resize(struct CircleQueue* queue, const queuesize_t size);
+queuesize_t circleQueue_dump(queuedata_t* dest, queuesize_t bufferSize, struct CircleQueue* src);
 queuesize_t circleQueue_size(struct CircleQueue* queue);
 queuesize_t circleQueue_capacity(struct CircleQueue* queue);
 queueindex_t circleQueue_currentIdx(struct CircleQueue* queue);
-queueindex_t circleQueue_map(struct CircleQueue* queue, queueindex_t i);
-void circleQueue_insert(struct CircleQueue* queue, const queuedata_t value);
+queueindex_t circleQueue_map(struct CircleQueue* queue, int32_t i);
+void circleQueue_insert(struct CircleQueue* queue, const queuedata_t value, const bool lock);
 void circleQueue_free(struct CircleQueue* queue);
 
 #endif

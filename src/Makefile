@@ -7,8 +7,7 @@ MYPUBDIR = $(HOME)/Education/cmpt433/public/myApps
 PUBDIR = $(HOME)/cmpt433/public/myApps
 
 TARGETS = light_sampler
-DEPENDS = main.o pingpot.o potDriver.o gpioHelper.o i2cHelper.o segdisDriver.o network.o udp.o light_sampler.o circleQueue.o
-OUTDIR = ""
+DEPENDS = main.o a2d.o pot_driver.o a2dping.o network.o light_sampler.o circleQueue.o udp.o i2cHelper.o gpioHelper.o segdis_driver.o
 
 all: $(TARGETS) deploy
 
