@@ -121,7 +121,7 @@ static void segdis_i2cInit(void)
 		system(sysCommands[i]);
 	}
 	i2ch_initBus(&i2cBusFD, bus, I2C_DEVICE);
-	for (int i = 0; i < MAX_POSITIONS; i++) {
+	for (int32_t i = 0; i < MAX_POSITIONS; i++) {
 		i2ch_writeReg(i2cBusFD, OUT_REGS[i], 0x00);
 		i2ch_writeReg(i2cBusFD, dirRegs[i], 0x00);
 	}
@@ -163,25 +163,24 @@ static inline void segdis_turnOff(const enum Pin pin)
 	gpio_writeValue(pin, SEGDIS_OFF);
 }
 
-static void segdis_writeFromCach(const unsigned int pinIdx)
+static void segdis_writeFromCach(const uint32_t pinIdx)
 {
 	i2ch_writeReg(i2cBusFD, REG_TOP, valueCache[pinIdx][TOP_IDX]);
 	i2ch_writeReg(i2cBusFD, REG_BOTTOM, valueCache[pinIdx][BTM_IDX]);
 }
 
-static void segdis_cachInt(const unsigned int n, const bool withDecimal)
+static void segdis_cachInt(const uint32_t n, const bool withDecimal)
 {
-	const unsigned char decimal = 0x40;
-	const unsigned int rightDigit = n % 10;
-	const unsigned int leftDigit = (n - rightDigit) / 10;
-	const int size = sizeof(PRESET_INTS[0][0]) * MAX_POSITIONS;
+	const uint8_t decimal = 0x40;
+	const uint32_t rightDigit = n % 10;
+	const uint32_t leftDigit = (n - rightDigit) / 10;
+	const int32_t size = sizeof(PRESET_INTS[0][0]) * MAX_POSITIONS;
 	memcpy(valueCache[0], PRESET_INTS[leftDigit], size);
 	memcpy(valueCache[1], PRESET_INTS[rightDigit], size);
 	if (withDecimal) {
 		valueCache[LEFT_IDX][BTM_IDX] = valueCache[LEFT_IDX][BTM_IDX] | decimal;
 	}
 }
-
 
 static void segdis_i2cCleanup(void)
 {

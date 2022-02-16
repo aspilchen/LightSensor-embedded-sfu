@@ -9,7 +9,7 @@
 static struct a2dping_Request a2dping_newRequestImpl(const second_t timeS
 													,const nanosecond_t timeNS
 													,const a2dfile_t fileno
-													,void (*callback)(const a2draw_t output)
+													,void (*callback)(const raw_t output)
 													,void (*handleErr)(void));
 
 static void  a2dping_startImpl(struct a2dping_Request* request);
@@ -22,7 +22,7 @@ static void* a2dping_threadFunc(void* arg);
 struct a2dping_Request a2dping_newRequest(const second_t timeS
 										 ,const nanosecond_t timeNS
 										 ,const a2dfile_t fileno
-										 ,void (*callback)(const a2draw_t output)
+										 ,void (*callback)(const raw_t output)
 										 ,void (*handleErr)(void))
 {
 	return a2dping_newRequestImpl(timeS, timeNS, fileno, callback, handleErr);
@@ -44,7 +44,7 @@ void a2dping_stop(struct a2dping_Request* request)
 static struct a2dping_Request a2dping_newRequestImpl(const second_t timeS
 													,const nanosecond_t timeNS
 													,const a2dfile_t fileno
-													,void (*callback)(const a2draw_t value)
+													,void (*callback)(const raw_t value)
 													,void (*handleErr)(void))
 {
 	struct a2dping_Request request = {
@@ -70,7 +70,7 @@ static void* a2dping_threadFunc(void* arg)
 {
 	struct a2dping_Request* request = (struct a2dping_Request*)arg;
 	enum a2d_ErrCode errcode;
-	a2draw_t raw = 0;
+	raw_t raw = 0;
 	struct timespec req = {request->timeS, request->timeMs};
 	struct timespec remaining; 
 	while (request->isActive) {

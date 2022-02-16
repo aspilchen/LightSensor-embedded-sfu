@@ -11,121 +11,137 @@
 #include "segdis_driver.h"
 #include "light_sampler.h"
 
-static struct CircleQueue queue;
+static struct CBuff historyBuffer;
 static struct a2dping_Request pingpot;
 static struct a2dping_Request pingsensor;
 
-static void sampler_potFunc(const a2draw_t raw);
-static void sampler_potErr(void);
-static samplesize_t sampler_countDips(const lightsample_t* samples, const samplesize_t size, double avg);
-static void* sampler_threadFunc(void* arg);
-static void sampler_sampleFunc(const a2draw_t value);
-static void* sampler_ledFuc(void* arg);
+static void sampler_potFunc(const raw_t raw);
+static void sampler_sampleFunc(const raw_t value);
+static void* sampler_consoleDisplay(void* arg);
+static void* sampler_ledDisplay(void* arg);
+
+static void sampler_initImpl(void);
+static void sampler_cleanupImpl(void);
+
+static uint32_t sampler_countImpl(void);
+static uint32_t sampler_capacityImpl(void);
+static uint32_t sampler_sizeImpl(void);
+static uint32_t sampler_historyImpl(volt_t* dest, uint32_t size);
+static uint32_t sampler_dipsImpl(void);
+static uint32_t sampler_countDips(const volt_t* samples, const uint32_t size);
+
+static uint32_t TOTAL_SAMPLES = 0;
+static uint32_t SAMPLES_PR_SECOND = 0;
+static volt_t RUNNING_AVG = 0;
+static raw_t POT_HIST = 0;
+
+const a2dfile_t SENSOR_FILENO = 1;
 
 static pthread_t ledThread;
 static pthread_t displayThread;
-static a2draw_t potHist = 0;
-static samplesize_t smplsPrS = 0;
 static bool isRunning = false;
-static double runningAvg = 0;
 
 void sampler_init(void)
 {
-	const second_t potSIrvl = 1;
-	const nanosecond_t potNSItrvl = 0;
-	const second_t lightSIrvl = 0;
-	const nanosecond_t lightNSItrvl = 1000000;
-	circleQueue_init(&queue);
-	pingpot = pot_newPingRequest(potSIrvl, potNSItrvl, sampler_potFunc, sampler_potErr);
-	pingsensor = a2dping_newRequest(lightSIrvl, lightNSItrvl, 1, sampler_sampleFunc, NULL);
-	a2dping_start(&pingpot);
-	a2dping_start(&pingsensor);
-	isRunning = true;
-	pthread_create(&displayThread, NULL, sampler_threadFunc, NULL);
-	pthread_create(&ledThread, NULL, sampler_ledFuc, NULL);
+	sampler_initImpl();
 }
 
 void sampler_cleanup(void)
+{
+	sampler_cleanupImpl();
+}
+
+uint32_t sampler_count(void)
+{
+	return sampler_countImpl();
+}
+
+uint32_t sampler_capacity(void)
+{
+	return sampler_capacityImpl();
+}
+
+uint32_t sampler_size(void)
+{
+	return sampler_sizeImpl();
+}
+
+uint32_t sampler_history(volt_t* dest, uint32_t size)
+{
+	return sampler_historyImpl(dest, size);
+}
+
+uint32_t sampler_dips(void)
+{
+	return sampler_dipsImpl();
+}
+
+static void sampler_initImpl(void)
+{
+	static const second_t POT_INTERVAL_S = 1;
+	static const nanosecond_t POT_INTERVAL_NS = 0;
+	static const second_t LIGHT_INTERVAL_S = 0;
+	static const nanosecond_t LIGHT_INTERVAL_NS = 1000000;
+	POT_HIST = 0;
+	RUNNING_AVG = 0;
+	SAMPLES_PR_SECOND = 0;
+	TOTAL_SAMPLES = 0;
+	pingpot = pot_newPingRequest(POT_INTERVAL_S, POT_INTERVAL_NS, sampler_potFunc, NULL);
+	pingsensor = a2dping_newRequest(LIGHT_INTERVAL_S, LIGHT_INTERVAL_NS, SENSOR_FILENO, sampler_sampleFunc, NULL);
+	isRunning = true;
+	cbuff_init(&historyBuffer);
+	a2dping_start(&pingpot);
+	a2dping_start(&pingsensor);
+	pthread_create(&displayThread, NULL, sampler_consoleDisplay, NULL);
+	pthread_create(&ledThread, NULL, sampler_ledDisplay, NULL);
+}
+
+static void sampler_cleanupImpl(void)
 {
 	pthread_cancel(displayThread);
 	pthread_cancel(ledThread);
 	a2dping_stop(&pingpot);
 	a2dping_stop(&pingsensor);
-	circleQueue_free(&queue);
+	cbuff_destroy(&historyBuffer);
 }
 
-samplesize_t sampler_count(void)
+static uint32_t sampler_countImpl(void)
 {
-	return queue.totalItems;
+	return TOTAL_SAMPLES;
 }
 
-samplesize_t sampler_capacity(void)
+static uint32_t sampler_capacityImpl(void)
 {
-	return circleQueue_capacity(&queue);
+	return cbuff_capacity(&historyBuffer);
 }
 
-samplesize_t sampler_size(void)
+static uint32_t sampler_sizeImpl(void)
 {
-	return circleQueue_size(&queue);
+	return cbuff_size(&historyBuffer);
 }
 
-samplesize_t sampler_history(lightsample_t* dest, samplesize_t size)
+static uint32_t sampler_historyImpl(volt_t* dest, uint32_t size)
 {
-	return circleQueue_dump(dest, size, &queue);
+	return cbuff_dump(dest, &historyBuffer, size);
 }
 
-samplesize_t sampler_dips(void)
+static uint32_t sampler_dipsImpl(void)
 {
-	lightsample_t samples[SAMPLER_MAX_HISTORY];
-	samplesize_t sampleSize = circleQueue_dump(samples, SAMPLER_MAX_HISTORY, &queue);
-	return sampler_countDips(samples, sampleSize, runningAvg);
+	volt_t samples[SAMPLER_MAX_HISTORY];
+	uint32_t sampleSize = cbuff_dump(samples, &historyBuffer, SAMPLER_MAX_HISTORY);
+	return sampler_countDips(samples, sampleSize);
 }
 
-void sampler_get(lightsample_t* dest, const samplesize_t size, const samplesize_t n)
+static uint32_t sampler_countDips(const volt_t* samples, const uint32_t size)
 {
-	circleQueue_lock(&queue);
-	samplesize_t i = circleQueue_size(&queue) - n;
-	queueindex_t mappedIdx = circleQueue_map(&queue, i);
-	if (i < 0) {
-		return;
-	}
-	while (0 <= mappedIdx && i < size) {
-		dest[i] = queue.data[mappedIdx];
-		i += 1;
-		mappedIdx = circleQueue_map(&queue, i);
-	}
-	circleQueue_unlock(&queue);
-}
-
-static void sampler_potFunc(a2draw_t raw)
-{
-	a2draw_t diff = abs(raw - potHist);
-	// prevent constant resizing due to noise
-	if (diff > 1) {
-		circleQueue_resize(&queue, raw);
-		potHist = raw;
-	}
-}
-
-static void sampler_potErr(void)
-{
-	const uint32_t errThreashold = 5;
-	static uint32_t nErrs = 0;
-	if (nErrs > errThreashold) {
-		printf("Error reading POT\n");
-		main_exit(EXIT_FAILURE);
-	}
-}
-
-static samplesize_t sampler_countDips(const lightsample_t* samples, const samplesize_t size, const double avg)
-{
-	const lightsample_t threashold = 0.1;
-	const lightsample_t hysteresis = threashold + 0.03;
-	samplesize_t nDips = 0;
-	double diff = 0;
+	static const volt_t threashold = 0.1;
+	static const volt_t hysteresis = threashold + 0.03;
+	const volt_t average = RUNNING_AVG;
+	volt_t diff = 0;
+	uint32_t nDips = 0;
 	bool inDip = false;
-	for (uint32_t i = 0; i < size; i++) {
-		diff = avg - samples[i];
+	for (index_t i = 0; i < size; i++) {
+		diff = average - samples[i];
 		if (threashold <= diff && !inDip) {
 			inDip = true;
 			nDips += 1;
@@ -136,33 +152,51 @@ static samplesize_t sampler_countDips(const lightsample_t* samples, const sample
 	return nDips;
 }
 
-
-static void sampler_sampleFunc(const a2draw_t value)
+static void sampler_potFunc(raw_t raw)
 {
-
-	const double weight = 0.01;
-	const lightsample_t volt = a2d_rawToVolt(value);
-	if (runningAvg == 0) {
-		runningAvg = volt;
-	} else {
-		runningAvg = (weight * volt) + ((1.0-weight) * runningAvg);
+	raw_t diff = abs(raw - POT_HIST);
+	// prevent constant resizing due to noise
+	if (diff > 1) {
+		cbuff_resize(&historyBuffer, raw);
+		POT_HIST = raw;
 	}
-	smplsPrS += 1;
-	circleQueue_insert(&queue, volt, true);
 }
 
-static void* sampler_threadFunc(void* arg)
+static void* sampler_ledDisplay(void* arg)
 {
-	const second_t waitTime = 1;
-	lightsample_t samples[SAMPLER_MAX_HISTORY];
-	samplesize_t sampleSize = 0;
-	samplesize_t nDips = 0;
+	const second_t LED_REFRESH_S = 0;
+	const nanosecond_t LED_REFRESH_NS = 100000000;
+	volt_t samples[SAMPLER_MAX_HISTORY];
+	uint32_t sampleSize = 0;
+	uint32_t nDips = 0;
+	struct timespec request = {LED_REFRESH_S, LED_REFRESH_NS};
+	struct timespec remaining;
 	while (isRunning) {
-		smplsPrS = 0;
-		sleep(waitTime);
-		sampleSize = circleQueue_dump(samples, SAMPLER_MAX_HISTORY, &queue);
-		nDips = sampler_countDips(samples, sampleSize, runningAvg);
-		printf("%d : %d : %d : %0.3f : %d\n", smplsPrS, potHist, sampleSize, runningAvg, nDips);
+		sampleSize = cbuff_dump(samples, &historyBuffer, SAMPLER_MAX_HISTORY);
+		nDips = sampler_countDips(samples, sampleSize);
+		segdis_setInt(nDips, false);
+		nanosleep(&request, &remaining);
+	}
+	return NULL;
+}
+
+static void* sampler_consoleDisplay(void* arg)
+{
+	static const second_t INTERVAL_SECONDS = 1;
+	volt_t samples[SAMPLER_MAX_HISTORY];
+	uint32_t sampleSize = 0;
+	uint32_t nDips = 0;
+	while (isRunning) {
+		SAMPLES_PR_SECOND = 0;
+		sampleSize = cbuff_dump(samples, &historyBuffer, SAMPLER_MAX_HISTORY);
+		sleep(INTERVAL_SECONDS);
+		nDips = sampler_countDips(samples, sampleSize);
+		printf("%d : %d : %d : %0.3f : %d\n"
+			  ,SAMPLES_PR_SECOND
+			  ,POT_HIST
+			  ,sampleSize
+			  ,RUNNING_AVG
+			  ,nDips);
 		for (int32_t i = 0; i < sampleSize; i++) {
 			if (i > 0 && i % 200 == 0) {
 				printf("%0.3f, ", samples[i]);
@@ -173,20 +207,16 @@ static void* sampler_threadFunc(void* arg)
 	return NULL;
 }
 
-static void* sampler_ledFuc(void* arg)
+static void sampler_sampleFunc(const raw_t value)
 {
-	const second_t itvlS = 0;
-	const nanosecond_t itvlNS = 100000000;
-	lightsample_t samples[SAMPLER_MAX_HISTORY];
-	samplesize_t sampleSize = 0;
-	samplesize_t nDips = 0;
-	struct timespec request = {itvlS, itvlNS};
-	struct timespec remaining;
-	while (isRunning) {
-		sampleSize = circleQueue_dump(samples, SAMPLER_MAX_HISTORY, &queue);
-		nDips = sampler_countDips(samples, sampleSize, runningAvg);
-		segdis_setInt(nDips, false);
-		nanosleep(&request, &remaining);
+	const double weight = 0.01;
+	const volt_t volt = a2d_rawToVolt(value);
+	if (RUNNING_AVG == 0) {
+		RUNNING_AVG = volt;
+	} else {
+		RUNNING_AVG = (weight * volt) + ((1.0-weight) * RUNNING_AVG);
 	}
-	return NULL;
+	SAMPLES_PR_SECOND += 1;
+	TOTAL_SAMPLES += 1;
+	cbuff_insert(&historyBuffer, volt);
 }

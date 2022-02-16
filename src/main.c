@@ -2,9 +2,9 @@
 #include <pthread.h>
 #include <stdio.h>
 
-#include "light_sampler.h"
+#include "main.h"
 #include "network.h"
-#include "circleQueue.h"
+#include "light_sampler.h"
 #include "segdis_driver.h"
 
 static int32_t exitCode = EXIT_SUCCESS;

@@ -3,12 +3,14 @@
 
 #include <stdint.h>
 
-typedef uint8_t gpiopin_t;
+#include "global.h"
 
 // Tried to do this with const variables but the compiler gets angry about discarding const.
 #define GPIO_IN   "in"
 #define GPIO_OUT  "out"
 #define GPIO_BOTH "both"
+
+typedef uint8_t gpiopin_t;
 
 enum gpio_ErrCode {
 	GPIO_OK,

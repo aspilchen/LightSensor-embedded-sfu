@@ -2,20 +2,19 @@
 #define SAMPLER_H
 
 #include <stdint.h>
-#include "circleQueue.h"
 
-#define SAMPLER_MAX_HISTORY 4090
+#include "global.h"
+#include "cbuff.h"
 
-typedef queuedata_t lightsample_t;
-typedef queuesize_t samplesize_t;
+#define SAMPLER_MAX_HISTORY 4095
+
 
 void sampler_init(void);
-samplesize_t sampler_count(void);
-samplesize_t sampler_capacity(void);
-samplesize_t sampler_size(void);
-samplesize_t sampler_history(lightsample_t* dest, samplesize_t size);  //-- display the full sample history being saved.
-void sampler_get(lightsample_t* dest, const samplesize_t size, const samplesize_t n);
-uint32_t sampler_dips(void); //-- display number of dips.
 void sampler_cleanup(void);
+uint32_t sampler_count(void);
+uint32_t sampler_capacity(void);
+uint32_t sampler_size(void);
+uint32_t sampler_history(volt_t* dest, uint32_t size);
+uint32_t sampler_dips(void);
 
 #endif

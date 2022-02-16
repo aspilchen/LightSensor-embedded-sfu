@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "global.h"
+
 #define I2C_BUS0 "/dev/i2c-0"
 #define I2C_BUS1 "/dev/i2c-1"
 #define I2C_BUS2 "/dev/i2c-2"

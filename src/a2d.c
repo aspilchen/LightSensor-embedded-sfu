@@ -8,22 +8,22 @@
 
 static const uint32_t A2D_MAX_PATHSIZE = 64;
 
-static enum a2d_ErrCode a2d_readRawImpl(a2draw_t* output, const a2dfile_t fileNumber);
-static a2dvolt_t a2d_rawToVoltImpl(a2draw_t rawVal);
+static enum a2d_ErrCode a2d_readRawImpl(raw_t* output, const a2dfile_t fileNumber);
+static volt_t a2d_rawToVoltImpl(raw_t rawVal);
 static inline void a2d_generatePath(char* dest, const a2dfile_t fileNumber);
 
-enum a2d_ErrCode a2d_readRaw(a2draw_t* output, const a2dfile_t fileNumber)
+enum a2d_ErrCode a2d_readRaw(raw_t* output, const a2dfile_t fileNumber)
 {
 	return a2d_readRawImpl(output, fileNumber);
 }
 
-a2dvolt_t a2d_rawToVolt(a2draw_t rawVal)
+volt_t a2d_rawToVolt(raw_t rawVal)
 {
 	return a2d_rawToVoltImpl(rawVal);
 }
 
 
-static enum a2d_ErrCode a2d_readRawImpl(a2draw_t* output, const a2dfile_t fileNumber)
+static enum a2d_ErrCode a2d_readRawImpl(raw_t* output, const a2dfile_t fileNumber)
 {
 	SOFT_ASSERT(0 <= fileNumber && fileNumber < A2D_N_INFILES);
 	char path[A2D_MAX_PATHSIZE];
@@ -36,9 +36,9 @@ static enum a2d_ErrCode a2d_readRawImpl(a2draw_t* output, const a2dfile_t fileNu
 	return A2D_OK;
 }
 
-static a2dvolt_t a2d_rawToVoltImpl(a2draw_t rawVal)
+static volt_t a2d_rawToVoltImpl(raw_t rawVal)
 {
-	a2dvolt_t voltage = ((a2dvolt_t)rawVal / A2D_MAX_RAW) * A2D_MAX_VOLT;
+	volt_t voltage = ((volt_t)rawVal / A2D_MAX_RAW) * A2D_MAX_VOLT;
 	return voltage;
 }
 
